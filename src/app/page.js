@@ -5,8 +5,9 @@ import Head from 'next/head';
 import { motion } from 'framer-motion';
 
 const COLUMN_COUNT = 4;
-const TILE_HEIGHT = 150;
-const INITIAL_FALL_SPEED = 2;
+const INITIAL_FALL_SPEED = 3;
+const SPEED_INCREMENT = 0.5; // Speed increase every 1000 points
+const GRADUAL_SPEED_MULTIPLIER = 1.0001; // Slight continuous speed increase
 
 export default function Home() {
   const [tiles, setTiles] = useState([]);
@@ -18,6 +19,7 @@ export default function Home() {
   const gameAreaRef = useRef(null);
   const animationFrameRef = useRef(null);
   const audioRef = useRef(null);
+  const lastUpdateTimeRef = useRef(0);
 
   useEffect(() => {
     const savedHighScore = localStorage.getItem('highScore');
@@ -47,40 +49,56 @@ export default function Home() {
     setScore(0);
     setGameOver(false);
     setFallSpeed(INITIAL_FALL_SPEED);
-    setTiles([generateNewTile()]);
+    setTiles([generateNewTile(0)]);
     audioRef.current.play();
+    lastUpdateTimeRef.current = performance.now();
     gameLoop();
   };
 
-  const generateNewTile = () => ({
+  const generateNewTile = (yPosition) => ({
+    id: Math.random(),
     column: Math.floor(Math.random() * COLUMN_COUNT),
-    y: -TILE_HEIGHT,
+    y: yPosition,
     tapped: false,
   });
 
-  const gameLoop = () => {
+  const gameLoop = (currentTime) => {
+    const deltaTime = currentTime - lastUpdateTimeRef.current;
+    lastUpdateTimeRef.current = currentTime;
+
     setTiles(prevTiles => {
-      const newTiles = prevTiles.map(tile => ({
+      const gameAreaHeight = gameAreaRef.current.clientHeight;
+      const tileHeight = gameAreaHeight / 4;
+
+      let newTiles = prevTiles.map(tile => ({
         ...tile,
-        y: tile.y + fallSpeed,
+        y: tile.y + fallSpeed * (deltaTime / 16.67), // Adjust for frame rate
       }));
 
-      if (newTiles[newTiles.length - 1].y > 0) {
-        newTiles.push(generateNewTile());
+      // Add new tile if needed
+      if (newTiles.length === 0 || newTiles[newTiles.length - 1].y > 0) {
+        newTiles.push(generateNewTile(-tileHeight));
       }
 
-      // Check if any untapped tile has passed the bottom of the game area
-      if (newTiles.some(tile => tile.y > gameAreaRef.current.clientHeight && !tile.tapped)) {
+      // Check for game over
+      if (newTiles.some(tile => tile.y > gameAreaHeight && !tile.tapped)) {
         handleGameOver();
         return newTiles;
       }
 
-      return newTiles.filter(tile => tile.y < gameAreaRef.current.clientHeight + TILE_HEIGHT);
+      // Remove off-screen tiles
+      newTiles = newTiles.filter(tile => tile.y < gameAreaHeight + tileHeight);
+
+      return newTiles;
     });
 
     setScore(prevScore => {
       const newScore = prevScore + 1;
-      setFallSpeed(INITIAL_FALL_SPEED + Math.floor(newScore / 100));
+      // Increase speed based on score milestones and gradual increase
+      setFallSpeed(prevSpeed => {
+        const incrementalIncrease = Math.floor(newScore / 1000) * SPEED_INCREMENT;
+        return (INITIAL_FALL_SPEED + incrementalIncrease) * Math.pow(GRADUAL_SPEED_MULTIPLIER, newScore);
+      });
       return newScore;
     });
 
@@ -88,13 +106,12 @@ export default function Home() {
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     }
   };
-
-  const handleTileClick = (index) => {
-    const clickedTile = tiles[index];
+  
+  const handleTileClick = (clickedTile) => {
     if (!clickedTile.tapped) {
       setTiles(prevTiles =>
-        prevTiles.map((tile, idx) =>
-          idx === index ? { ...tile, tapped: true } : tile
+        prevTiles.map(tile =>
+          tile.id === clickedTile.id ? { ...tile, tapped: true } : tile
         )
       );
       setScore(prevScore => prevScore + 10);
@@ -121,30 +138,31 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-blue-500 to-purple-600 text-white">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-blue-600 to-purple-700 text-white p-4">
       <Head>
         <title>Piano Tiles Game</title>
         <link rel="icon" href="/favicon.ico" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
       </Head>
 
-      <main className="text-center">
-        <h1 className="text-6xl font-bold mb-8 text-shadow">Piano Tiles</h1>
-        <p className="text-xl mb-6 text-shadow">Tap the black tiles before they reach the bottom!</p>
+      <main className="text-center w-full max-w-md">
+        <h1 className="text-4xl md:text-6xl font-bold mb-4 md:mb-8 text-shadow">Piano Tiles</h1>
+        <p className="text-lg md:text-xl mb-4 md:mb-6 text-shadow">Tap the black tiles before they reach the bottom!</p>
 
         {gameOver && (
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
-            className="mb-4 bg-white text-black p-6 rounded-lg shadow-lg"
+            className="mb-4 bg-white text-black p-4 md:p-6 rounded-lg shadow-lg"
           >
-            <p className="text-3xl font-bold">Game Over!</p>
-            <p className="text-2xl">Final Score: {score}</p>
+            <p className="text-2xl md:text-3xl font-bold">Game Over!</p>
+            <p className="text-xl md:text-2xl">Final Score: {score}</p>
           </motion.div>
         )}
 
         {!isPlaying ? (
           <motion.button 
-            className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 px-6 rounded-full text-xl shadow-lg transition duration-300 ease-in-out transform hover:scale-105"
+            className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-2 px-4 md:py-3 md:px-6 rounded-full text-lg md:text-xl shadow-lg transition duration-300 ease-in-out transform hover:scale-105"
             onClick={() => setIsPlaying(true)}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -152,38 +170,41 @@ export default function Home() {
             Start Game
           </motion.button>
         ) : (
-          <div>
-            <p className="mb-4 text-4xl font-bold text-shadow">{score}</p>
+          <div className="w-full">
+            <p className="mb-2 md:mb-4 text-3xl md:text-4xl font-bold text-shadow">{score}</p>
             <div 
               ref={gameAreaRef}
-              className="relative bg-black rounded-lg overflow-hidden shadow-2xl"
-              style={{ height: '600px', width: `${COLUMN_COUNT * TILE_HEIGHT}px` }}
+              className="relative bg-black rounded-lg overflow-hidden shadow-2xl mx-auto"
+              style={{ height: '70vh', maxHeight: '600px', width: '100%', maxWidth: '400px' }}
             >
-              {tiles.map((tile, index) => (
-                <motion.div
-                  key={index}
-                  className={`absolute ${tile.tapped ? 'bg-gray-700' : 'bg-white'} cursor-pointer`}
-                  style={{
-                    left: `${tile.column * TILE_HEIGHT}px`,
-                    top: `${tile.y}px`,
-                    width: `${TILE_HEIGHT}px`,
-                    height: `${TILE_HEIGHT}px`,
-                  }}
-                  onClick={() => handleTileClick(index)}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                />
-              ))}
+              {tiles.map((tile) => {
+                const tileHeight = gameAreaRef.current ? gameAreaRef.current.clientHeight / 4 : 150;
+                return (
+                  <motion.div
+                    key={tile.id}
+                    className={`absolute ${tile.tapped ? 'bg-gray-700' : 'bg-white'} cursor-pointer`}
+                    style={{
+                      left: `${(tile.column / COLUMN_COUNT) * 100}%`,
+                      top: `${tile.y}px`,
+                      width: `${100 / COLUMN_COUNT}%`,
+                      height: `${tileHeight}px`,
+                    }}
+                    onClick={() => handleTileClick(tile)}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
       </main>
 
-      <footer className="mt-8 text-center text-white text-shadow">
-        <p>High Score: {highScore}</p>
-        <p className="mt-2">Created with Next.js and Tailwind CSS</p>
+      <footer className="mt-4 md:mt-8 text-center text-white text-shadow">
+        <p className="text-lg md:text-xl">High Score: {highScore}</p>
+        <p className="mt-2 text-sm md:text-base">Created with Next.js and Tailwind CSS</p>
       </footer>
     </div>
   );
